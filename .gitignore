@@ -50,5 +50,18 @@ test
 prompt
 
 server.log
+
 # Skills directory
 /skills/
+
+# arquivos internos do ambiente de desenvolvimento (não publicar)
+/tool-results/
+/upload/
+/download/
+/worklog.md
+/.zscripts/
+/Caddyfile
+/db/*.db
+/examples/
+/mini-services/
+/tests/
