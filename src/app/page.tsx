@@ -38,6 +38,38 @@ const APP_LOGIN_SCREEN = "/assets/app-tela-login.webp";
 const ANSWER_HOLD_MS = 80; // tempo mínimo para o estado selecionado pintar na tela
 
 /* ======================================================================
+ *  🏷️  CONDIÇÃO DE BLACK FRIDAY (DATA_FIM_OFERTA)
+ * ======================================================================
+ *  A faixa "Condição especial de Black Friday disponível por tempo
+ *  limitado." aparece em dois pontos: na abertura e antes do botão que
+ *  leva ao checkout.
+ *
+ *  Para informar uma data REAL de encerramento, preencha abaixo no
+ *  formato AAAA-MM-DD (ex.: "2025-12-05"):
+ *    - com data: a faixa acrescenta "Disponível até [data]" e some
+ *      automaticamente quando a condição termina;
+ *    - sem data (""): apenas o texto genérico — SEM contagem regressiva,
+ *      número de vagas ou prazo específico inventado.
+ * ==================================================================== */
+const DATA_FIM_OFERTA = ""; // ex.: "2025-12-05"
+
+type OfertaInfo = { ativa: boolean; ateTexto: string | null };
+
+/** Estado da faixa de oferta para uma hora atual. Sem data configurada
+ *  a faixa fica ativa com texto genérico (nada inventado). */
+function ofertaInfo(nowMs: number): OfertaInfo {
+  if (!DATA_FIM_OFERTA) return { ativa: true, ateTexto: null };
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(DATA_FIM_OFERTA.trim());
+  if (!parts) return { ativa: true, ateTexto: null }; // data inválida: ignora a configuração
+  const [, ano, mes, dia] = parts;
+  const fim = new Date(Number(ano), Number(mes) - 1, Number(dia), 23, 59, 59, 999);
+  return {
+    ativa: nowMs <= fim.getTime(),
+    ateTexto: `${dia}/${mes}/${ano}`,
+  };
+}
+
+/* ======================================================================
  *  📊 EVENTOS DE PIXEL (opcional)
  * ======================================================================
  *  O projeto não possui pixel configurado no momento, então as chamadas
@@ -163,7 +195,7 @@ function buildCheckoutUrl(): string {
 /*  Estado da sessão (armazenamento externo + useSyncExternalStore)    */
 /* ------------------------------------------------------------------ */
 
-type Stage = "intro" | "quiz" | "result";
+type Stage = "intro" | "quiz" | "edu1" | "edu2" | "result";
 const STORAGE_KEY = "livro-dos-sonhos-quiz-v1";
 
 type QuizState = { stage: Stage; current: number; answers: (string | null)[] };
@@ -184,6 +216,11 @@ function isValidState(data: unknown): data is QuizState {
   if (!validAnswers) return false;
   if (d.stage === "quiz") {
     return typeof d.current === "number" && d.current >= 0 && d.current < QUESTIONS.length;
+  }
+  if (d.stage === "edu1" || d.stage === "edu2") {
+    /* telas educativas: exigem a pergunta de origem respondida */
+    const idx = d.stage === "edu1" ? 1 : 3;
+    return d.current === idx && (d.answers as (string | null)[])[idx] != null;
   }
   if (d.stage === "result") {
     return (d.answers as (string | null)[]).every((a) => a !== null);
@@ -245,6 +282,41 @@ function updateQuizState(next: QuizState): void {
   listeners.forEach((listener) => listener());
 }
 
+/* Relógio externo para a faixa de oferta: no servidor/hidratação devolve
+   0 (condição considerada ativa — evita divergência de hidratação); no
+   cliente, mede a hora real assim que o primeiro componente assina e
+   revalida a cada 30s, retirando a faixa automaticamente quando a
+   condição termina. */
+let clockNow = 0;
+const clockListeners = new Set<() => void>();
+let clockTimer: number | null = null;
+
+function subscribeClock(listener: () => void): () => void {
+  clockListeners.add(listener);
+  if (typeof window !== "undefined" && clockTimer === null) {
+    clockNow = Date.now();
+    clockTimer = window.setInterval(() => {
+      clockNow = Date.now();
+      clockListeners.forEach((l) => l());
+    }, 30_000);
+  }
+  return () => {
+    clockListeners.delete(listener);
+    if (clockListeners.size === 0 && clockTimer !== null) {
+      window.clearInterval(clockTimer);
+      clockTimer = null;
+    }
+  };
+}
+
+function getClockSnapshot(): number {
+  return clockNow;
+}
+
+function getClockServerSnapshot(): number {
+  return 0;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Componentes visuais                                                */
 /* ------------------------------------------------------------------ */
@@ -252,7 +324,27 @@ function updateQuizState(next: QuizState): void {
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Image from "next/image";
 import { AnimatePresence, MotionConfig, motion } from "framer-motion";
-import { ArrowRight, Check, ChevronLeft, ShieldCheck, Sparkles } from "lucide-react";
+import {
+  ArrowRight,
+  Bird,
+  BookOpen,
+  Box,
+  Brain,
+  Check,
+  ChevronLeft,
+  Footprints,
+  Home,
+  ListChecks,
+  PawPrint,
+  ScrollText,
+  SearchX,
+  ShieldCheck,
+  Smartphone,
+  Sparkles,
+  Tag,
+  X,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const goldCtaClass =
@@ -274,6 +366,75 @@ function Eyebrow({ children, className }: { children: React.ReactNode; className
       <span aria-hidden className="h-px w-6 bg-gold" />
       {children}
     </p>
+  );
+}
+
+/** Cabeçalho das telas do meio do quiz: botão voltar + progresso real.
+ *  Compartilhado pelas perguntas e pelas telas educativas. */
+function QuizHeader({ step, onBack }: { step: number; onBack: () => void }) {
+  return (
+    <header>
+      <div className="flex min-h-[44px] items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          className="-ml-2 flex min-h-[44px] cursor-pointer items-center gap-1 rounded-lg px-2 text-[14px] font-semibold uppercase tracking-[0.08em] text-ink-soft transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-deep focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
+        >
+          <ChevronLeft aria-hidden className="h-5 w-5" strokeWidth={2.5} />
+          Voltar
+        </button>
+        <span
+          className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-gold-deep"
+          aria-live="polite"
+        >
+          {step} de {QUESTIONS.length}
+        </span>
+      </div>
+
+      {/* barra de progresso real */}
+      <div
+        role="progressbar"
+        aria-label="Progresso do quiz"
+        aria-valuemin={0}
+        aria-valuemax={QUESTIONS.length}
+        aria-valuenow={step}
+        className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#e7dcc2]"
+      >
+        <div
+          className="h-full rounded-full bg-gold transition-all duration-200 ease-out"
+          style={{ width: `${(step / QUESTIONS.length) * 100}%` }}
+        />
+      </div>
+    </header>
+  );
+}
+
+/** Faixa discreta da condição de Black Friday. Sem DATA_FIM_OFERTA mostra
+ *  apenas o texto genérico (nada inventado); com data real configurada,
+ *  acrescenta "Disponível até [data]" e some sozinha quando termina. */
+function OfertaBand({ className }: { className?: string }) {
+  const now = useSyncExternalStore(subscribeClock, getClockSnapshot, getClockServerSnapshot);
+  const { ativa, ateTexto } = ofertaInfo(now);
+  if (!ativa) return null;
+  return (
+    <div
+      role="note"
+      aria-label="Condição especial de Black Friday"
+      className={cn(
+        "rounded-2xl border border-[#e0d3ab] bg-[#fdf9ee] px-4 py-2 text-center",
+        className,
+      )}
+    >
+      <p className="flex items-center justify-center gap-2 text-[12.5px] font-semibold leading-snug text-ink-soft">
+        <Tag aria-hidden className="h-4 w-4 shrink-0 text-gold-deep" />
+        <span>Condição especial de Black Friday disponível por tempo limitado.</span>
+      </p>
+      {ateTexto && (
+        <p className="mt-0.5 text-[13px] font-extrabold text-gold-deep">
+          Disponível até {ateTexto}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -347,6 +508,198 @@ function PathScale() {
         <Check className="h-5 w-5 text-[#241b07]" strokeWidth={3.25} />
       </motion.span>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Telas educativas curtas (passagem rápida, não etapa de vendas)      */
+/* ------------------------------------------------------------------ */
+
+/** Termos citados na tela educativa 1 — ícones discretos, todos do mesmo
+ *  tamanho (nenhum elemento é protagonista da tela). */
+const EDU1_TERMS: { icon: LucideIcon; label: string }[] = [
+  { icon: PawPrint, label: "Animal" },
+  { icon: Box, label: "Objeto" },
+  { icon: Home, label: "Casa" },
+  { icon: Footprints, label: "Sapato" },
+  { icon: ScrollText, label: "Papel" },
+  { icon: Bird, label: "Papagaio" },
+];
+
+/** Etapa do fluxo visual "Lembrar → buscar o verbete → conferir as
+ *  associações" (ícone + rótulo, mesmas proporções). */
+function FlowStep({ icon: Icon, label }: { icon: LucideIcon; label: string }) {
+  return (
+    <div className="flex min-w-0 flex-1 flex-col items-center text-center">
+      <span className="flex h-10 w-10 items-center justify-center rounded-full border border-[#d8b96a] bg-[#f8ecc9]">
+        <Icon aria-hidden className="h-5 w-5 text-gold-deep" />
+      </span>
+      <span className="mt-1.5 text-[11.5px] font-bold leading-tight text-ink">{label}</span>
+    </div>
+  );
+}
+
+/** TELA EDUCATIVA 1 — mostrada após a pergunta 2. Leitura de poucos
+ *  segundos, botão bem visível e avanço imediato (as animações de
+ *  entrada são discretas e não bloqueiam o toque). */
+function EduScreen1({
+  step,
+  onBack,
+  onContinue,
+}: {
+  step: number;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  return (
+    <motion.section
+      aria-label="Dica de consulta"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0, transition: { duration: 0.15, ease: "easeOut" } }}
+      exit={{ opacity: 0, y: -8, transition: { duration: 0.05, ease: "easeIn" } }}
+      className="flex flex-1 flex-col py-6"
+    >
+      <QuizHeader step={step} onBack={onBack} />
+
+      <div className="flex flex-1 flex-col justify-center py-6">
+        <Eyebrow>Como consultar</Eyebrow>
+
+        <h2 className="mt-3 text-[22px] font-bold leading-snug text-ink">
+          Lembrou de um detalhe do sonho?{" "}
+          <span className="text-gold-deep">Já dá para começar.</span>
+        </h2>
+
+        <p className="mt-2.5 text-[15.5px] leading-relaxed text-ink-soft">
+          Animal, objeto, casa, sapato, papel, papagaio… O Livro dos Sonhos reúne verbetes para
+          você buscar o que apareceu no sonho e conferir as associações com bichos e números.
+        </p>
+
+        {/* termos de exemplo citados no texto (ícones discretos) */}
+        <ul
+          aria-label="Exemplos de termos que dá para buscar"
+          className="mt-5 flex flex-wrap gap-2"
+        >
+          {EDU1_TERMS.map(({ icon: Icon, label }) => (
+            <li
+              key={label}
+              className="flex items-center gap-1.5 rounded-full border border-[#e0d5bb] bg-paper px-3 py-1.5 text-[13px] font-semibold text-ink-soft"
+            >
+              <Icon aria-hidden className="h-4 w-4 shrink-0 text-gold-deep" />
+              {label}
+            </li>
+          ))}
+        </ul>
+
+        {/* Lembrar → buscar o verbete → conferir as associações */}
+        <div className="mt-5 rounded-2xl border border-[#e0d3ab] bg-paper p-4 shadow-[0_14px_35px_-22px_rgba(60,45,10,0.25)]">
+          <div className="flex items-start justify-between gap-1">
+            <FlowStep icon={Brain} label="Lembrar" />
+            <ArrowRight aria-hidden className="mt-3 h-4 w-4 shrink-0 text-ink-faint" />
+            <FlowStep icon={BookOpen} label="buscar o verbete" />
+            <ArrowRight aria-hidden className="mt-3 h-4 w-4 shrink-0 text-ink-faint" />
+            <FlowStep icon={ListChecks} label="conferir as associações" />
+          </div>
+        </div>
+
+        <button type="button" onClick={onContinue} className={cn(goldCtaClass, "mt-6")}>
+          Continuar o quiz
+          <ArrowRight aria-hidden className="h-5 w-5" strokeWidth={2.75} />
+        </button>
+      </div>
+    </motion.section>
+  );
+}
+
+/** TELA EDUCATIVA 2 — mostrada após a pergunta 4. Comparação visual de
+ *  processo, SEM porcentagens, estatísticas ou depoimentos (apenas a
+ *  descrição honesta dos dois caminhos). */
+function EduScreen2({
+  step,
+  onBack,
+  onContinue,
+}: {
+  step: number;
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  return (
+    <motion.section
+      aria-label="Consulta simplificada"
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0, transition: { duration: 0.15, ease: "easeOut" } }}
+      exit={{ opacity: 0, y: -8, transition: { duration: 0.05, ease: "easeIn" } }}
+      className="flex flex-1 flex-col py-6"
+    >
+      <QuizHeader step={step} onBack={onBack} />
+
+      <div className="flex flex-1 flex-col justify-center py-6">
+        <Eyebrow>O jeito mais prático</Eyebrow>
+
+        <h2 className="mt-3 text-[22px] font-bold leading-snug text-ink">
+          A consulta pode ser <span className="text-gold-deep">bem mais simples</span>
+        </h2>
+
+        <p className="mt-2.5 text-[15.5px] leading-relaxed text-ink-soft">
+          No aplicativo do Livro dos Sonhos, você pode buscar pelo que lembra e consultar as
+          informações em um só lugar, pelo celular. É uma forma prática de explorar os significados
+          e os números relacionados ao sonho.
+        </p>
+
+        {/* comparação de processo (sem pesquisa, estatística ou taxa de sucesso) */}
+        <div className="mt-4 flex flex-col gap-2.5">
+          <div className="rounded-2xl border border-[#e0d5bb] bg-paper p-3.5">
+            <p className="flex items-center gap-2 text-[12.5px] font-extrabold uppercase tracking-[0.1em] text-ink-faint">
+              <SearchX aria-hidden className="h-5 w-5 shrink-0 text-ink-faint" />
+              Sem uma fonte organizada
+            </p>
+            <ul className="mt-2 flex flex-col gap-1.5">
+              <li className="flex items-start gap-2 text-[14px] leading-snug text-ink-soft">
+                <X aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" />
+                Procurar em vários lugares
+              </li>
+              <li className="flex items-start gap-2 text-[14px] leading-snug text-ink-soft">
+                <X aria-hidden className="mt-0.5 h-4 w-4 shrink-0 text-ink-faint" />
+                Perder tempo tentando achar o termo
+              </li>
+            </ul>
+          </div>
+
+          <div className="rounded-2xl border border-[#d8b96a] bg-[#fdf9ee] p-3.5 shadow-[0_14px_35px_-22px_rgba(60,45,10,0.25)]">
+            <p className="flex items-center gap-2 text-[12.5px] font-extrabold uppercase tracking-[0.1em] text-gold-deep">
+              <Smartphone aria-hidden className="h-5 w-5 shrink-0" />
+              Com Livro + Aplicativo
+            </p>
+            <ul className="mt-2 flex flex-col gap-1.5">
+              {["Buscar o termo", "Abrir o verbete", "Conferir as associações"].map((item) => (
+                <li
+                  key={item}
+                  className="flex items-start gap-2 text-[14px] font-semibold leading-snug text-ink"
+                >
+                  <Check
+                    aria-hidden
+                    className="mt-0.5 h-4 w-4 shrink-0 text-gold-deep"
+                    strokeWidth={3}
+                  />
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+
+        {/* rodapé curto e honesto */}
+        <p className="mt-3 flex items-start gap-1.5 text-[12.5px] leading-snug text-ink-faint">
+          <ShieldCheck aria-hidden className="mt-px h-4 w-4 shrink-0 text-gold-deep" />
+          A consulta organiza as informações. Ela não prevê resultados nem aumenta as chances de
+          acerto.
+        </p>
+
+        <button type="button" onClick={onContinue} className={cn(goldCtaClass, "mt-5")}>
+          Continuar o quiz
+          <ArrowRight aria-hidden className="h-5 w-5" strokeWidth={2.75} />
+        </button>
+      </div>
+    </motion.section>
   );
 }
 
@@ -482,6 +835,8 @@ function ConditionWheel({
             <span className="text-gold-deep">Condição liberada!</span> Veja os detalhes na próxima
             página.
           </p>
+          {/* faixa da condição, antes do botão que leva ao checkout */}
+          <OfertaBand className="mt-3" />
           <a
             ref={checkoutLinkRef}
             href={CHECKOUT_URL}
@@ -563,11 +918,23 @@ export default function DreamBookQuiz() {
     cancelPendingAdvance();
     setSelected(null);
     setLocked(false);
+    if (stage === "edu1" || stage === "edu2") {
+      /* da tela educativa, volta para a pergunta que a originou —
+         a resposta permanece marcada */
+      updateQuizState({ stage: "quiz", current, answers });
+      return;
+    }
     if (current === 0) {
       updateQuizState({ stage: "intro", current: 0, answers });
     } else {
+      /* voltar pula as telas educativas: sempre para a pergunta anterior */
       updateQuizState({ stage: "quiz", current: current - 1, answers });
     }
+  }
+
+  function continueFromEdu() {
+    /* edu1 → pergunta 3 · edu2 → pergunta 5 */
+    updateQuizState({ stage: "quiz", current: stage === "edu1" ? 2 : 4, answers });
   }
 
   function choose(optionId: string) {
@@ -582,6 +949,12 @@ export default function DreamBookQuiz() {
       if (current === QUESTIONS.length - 1) {
         trackEvent("quiz_complete");
         updateQuizState({ stage: "result", current, answers: nextAnswers });
+      } else if (current === 1) {
+        /* após a pergunta 2: tela educativa curta (não é etapa de vendas) */
+        updateQuizState({ stage: "edu1", current: 1, answers: nextAnswers });
+      } else if (current === 3) {
+        /* após a pergunta 4: tela educativa curta (não é etapa de vendas) */
+        updateQuizState({ stage: "edu2", current: 3, answers: nextAnswers });
       } else {
         updateQuizState({ stage: "quiz", current: current + 1, answers: nextAnswers });
       }
@@ -636,8 +1009,11 @@ export default function DreamBookQuiz() {
                 initial={{ opacity: 0, y: 14 }}
                 animate={{ opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } }}
                 exit={{ opacity: 0, y: -10, transition: { duration: 0.12, ease: "easeIn" } }}
-                className="flex flex-1 flex-col justify-center py-8"
+                className="flex flex-1 flex-col justify-center py-6"
               >
+                {/* faixa discreta da condição (some sozinha ao expirar) */}
+                <OfertaBand className="mb-4" />
+
                 <Eyebrow>Quiz rápido • 6 perguntas</Eyebrow>
 
                 <h1 className="mt-4 text-[42px] font-extrabold leading-[1.04] tracking-tight text-ink">
@@ -653,7 +1029,7 @@ export default function DreamBookQuiz() {
 
                 {/* capa original do livro + tela principal real do aplicativo */}
                 <div
-                  className="mt-8 flex items-end justify-center gap-4 pb-2"
+                  className="mt-6 flex items-end justify-center gap-4 pb-2"
                   aria-label="Livro e aplicativo"
                 >
                   <div className="w-[58%] max-w-[212px] -rotate-2">
@@ -675,12 +1051,12 @@ export default function DreamBookQuiz() {
                   />
                 </div>
 
-                <button type="button" onClick={startQuiz} className={cn(goldCtaClass, "mt-9")}>
+                <button type="button" onClick={startQuiz} className={cn(goldCtaClass, "mt-7")}>
                   Começar
                   <ArrowRight aria-hidden className="h-5 w-5" strokeWidth={2.75} />
                 </button>
 
-                <p className="mt-3.5 text-center text-[14px] text-ink-faint">
+                <p className="mt-3 text-center text-[14px] text-ink-faint">
                   Leva menos de 1 minuto.
                 </p>
               </motion.section>
@@ -696,39 +1072,7 @@ export default function DreamBookQuiz() {
                 exit={{ opacity: 0, y: -8, transition: { duration: 0.05, ease: "easeIn" } }}
                 className="flex flex-1 flex-col py-6"
               >
-                <header>
-                  <div className="flex min-h-[44px] items-center justify-between gap-3">
-                    <button
-                      type="button"
-                      onClick={goBack}
-                      className="-ml-2 flex min-h-[44px] cursor-pointer items-center gap-1 rounded-lg px-2 text-[14px] font-semibold uppercase tracking-[0.08em] text-ink-soft transition-colors hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-deep focus-visible:ring-offset-2 focus-visible:ring-offset-cream"
-                    >
-                      <ChevronLeft aria-hidden className="h-5 w-5" strokeWidth={2.5} />
-                      Voltar
-                    </button>
-                    <span
-                      className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-gold-deep"
-                      aria-live="polite"
-                    >
-                      {current + 1} de {QUESTIONS.length}
-                    </span>
-                  </div>
-
-                  {/* barra de progresso real */}
-                  <div
-                    role="progressbar"
-                    aria-label="Progresso do quiz"
-                    aria-valuemin={0}
-                    aria-valuemax={QUESTIONS.length}
-                    aria-valuenow={current + 1}
-                    className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-[#e7dcc2]"
-                  >
-                    <div
-                      className="h-full rounded-full bg-gold transition-all duration-200 ease-out"
-                      style={{ width: `${((current + 1) / QUESTIONS.length) * 100}%` }}
-                    />
-                  </div>
-                </header>
+                <QuizHeader step={current + 1} onBack={goBack} />
 
                 <div className="flex flex-1 flex-col justify-center py-6">
                   <h2 className="text-[22px] font-bold leading-snug text-ink">{question.prompt}</h2>
@@ -794,6 +1138,26 @@ export default function DreamBookQuiz() {
                   </div>
                 </div>
               </motion.section>
+            )}
+
+            {/* ============ TELA EDUCATIVA 1 (após a pergunta 2) ============ */}
+            {stage === "edu1" && (
+              <EduScreen1
+                key="edu1"
+                step={current + 1}
+                onBack={goBack}
+                onContinue={continueFromEdu}
+              />
+            )}
+
+            {/* ============ TELA EDUCATIVA 2 (após a pergunta 4) ============ */}
+            {stage === "edu2" && (
+              <EduScreen2
+                key="edu2"
+                step={current + 1}
+                onBack={goBack}
+                onContinue={continueFromEdu}
+              />
             )}
 
             {/* ============ RESULTADO ============ */}
