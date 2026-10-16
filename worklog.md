@@ -26,3 +26,27 @@ Stage Summary:
 - Assets reais: capa original (sem redesenho) + páginas internas reais extraídas do PDF (índice, tabela, verbetes) em composição em leque.
 - Pendência única do usuário: adicionar o print real da busca do aplicativo como public/assets/app-busca.png (ou .jpg) para substituir automaticamente o espaço reservado.
 - Rodapé legal inclui aviso de não promessa de acertos e proibição para menores de 18.
+
+---
+Task ID: 2
+Agent: Z.ai Code (agente principal)
+Task: Atualização completa do quiz (comando substitutivo): respostas imediatas (~150-200ms), nova tipografia/identidade creme+dourado, duas telas reais do aplicativo em mockups, tela final simplificada (sem preço/oferta) com escala animada + roleta de revelação da condição preservando UTMs.
+
+Work Log:
+- Imagens enviadas pelo usuário identificadas via VLM: upload/"tela 1.webp" = tela principal do app (busca "O que você sonhou?", consulta rápida, índice A-Z); upload/"login.webp" = tela de login ("SEU E-MAIL", "Acessar aplicativo"). Ambas 808×1646 RGBA. Copiadas para public/assets/app-tela-principal.webp (64KB) e app-tela-login.webp (55KB).
+- Fonte trocada para Plus Jakarta Sans variável (200-800, latin, 26.7KB): obtida via @fontsource-variable/plus-jakarta-sans (bun add → cópia do woff2 → bun remove), auto-hospedada em public/fonts/plusjakartasans-variable-latin.woff2 com OFL. Playfair/Archivo removidos. Sem itálicos (apenas arquivo normal).
+- Identidade invertida para creme (checkout): fundo #f6f0e4, texto #241d12, cartões #fffdf7, dourado #e9b53c (botões) + #7a5b10 (texto/anéis sobre creme), terracota preservada. Tokens novos em globals.css: paper, ink-soft, ink-faint, gold-deep. themeColor #f6f0e4 no layout.
+- Responsividade das respostas: choose() com ANSWER_HOLD_MS=80 (estado selecionado pinta imediatamente) + transições framer encurtadas (exit 50ms, enter 150ms, modo wait). Medição no navegador: seleção visível ~81ms; troca completa ~300ms com feedback instantâneo. Proteção anti-toque-duplo (locked) verificada com dblclick (avança só 1). Timer de avanço cancelado em goBack/restart/unmount (corrige bug latente de avanço com estado obsoleto).
+- Tela final simplificada: removidos preço R$ 19,90, bloco de vendas, capa repetida e composição paginas-livro.jpg (arquivo mantido em disco, não referenciado). Nova PathScale: 6 segmentos dourados + selo de check com stagger rápido (~0,75s), decorativa (aria-hidden), respeita reduced-motion via MotionConfig.
+- Texto do resultado: título "Seu caminho de consulta está pronto" + texto adaptado — padrão "Agora você pode consultar..." / variante "Mesmo quando você lembra só de um detalhe..." quando Q1=nenhum (lógica preservada do spec original; verificado no navegador respondendo "Não lembro de nenhum agora").
+- Roleta de revelação (ConditionWheel): conic-gradient de 8 setores idênticos (sem fingir chances), ponteiro, centro com Sparkles→Check. Giro CSS 1,7s (classe .wheel-rotor com cubic-bezier desaceleração) + revelação via transitionend (medida real: 1754ms) + temporizador de segurança 1,9s; nunca bloqueia (link "Continuar para a página" sempre ativo pré-revelação). Reduced-motion: revela na hora (verificado com override de matchMedia: 151ms). Mensagens exatas do spec; sem preço/percentual no quiz.
+- Mockups do aplicativo: PhoneMockup com proporção real 808/1646 (nada cortado), aro escuro discreto; empilhados no mobile (max-w 280px), lado a lado ≥640px (225px). Tela principal + legenda "Consulta pelo aplicativo / Uma palavra já é suficiente para começar."; login + frase exigida "Após a compra, acesse o aplicativo com seu e-mail.". Imagens aquecidas via new Image() apenas no mount do resultado; nunca durante perguntas.
+- Layout compactado após teste em 360×640 (botão REVELAR estava 49px abaixo da dobra): pt-6, roleta 152px mobile, margens reduzidas — botão agora visível sem scroll (574-634px em viewport 640).
+- Corrigido durante o teste: CSS servido desatualizado (watcher do Turbopack morrera) — servidor dev reiniciado (pkill + setsid/nohup), chunk globals regenerado com .wheel-rotor e novos tokens.
+- Verificação agent-browser completa: intro/Q1-Q6 em 390×844, 360×640 e 1280×800; voltar preserva resposta; fluxo scriptado início→6 respostas→revelação→VER MINHA CONDIÇÃO com href "https://pay.cakto.com.br/3ahathx_1209170?utm_source=facebook&utm_campaign=sonhou&utm_term=quiz-v2"; link "Continuar para a página" também com UTMs; opções sem corte em 360px; rodapé colado ao fundo (gap 0) e empurrado naturalmente no desktop (doc 1474px); mockups lado a lado no desktop; console sem erros JS/hidratação; lint limpo.
+- Pixel: eventos quiz_start / quiz_complete / condition_reveal / checkout_click (dedup por carregamento; nenhum de compra).
+
+Stage Summary:
+- Quiz atualizado integralmente conforme comando substitutivo do usuário; perguntas, respostas e link de checkout preservados.
+- Duas telas reais do aplicativo integradas com identidade original; CHECKOUT_URL inalterado em local evidente.
+- Pendências do usuário: nenhuma conhecida — placeholders antigos (app-busca.png) foram substituídos pelas imagens reais.

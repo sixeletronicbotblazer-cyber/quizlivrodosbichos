@@ -1,0 +1,758 @@
+     1→"use client";
+     2→
+     3→/* ======================================================================
+     4→ *  🔗 LINK DO CHECKOUT — COLE AQUI A URL DE PAGAMENTO
+     5→ * ======================================================================
+     6→ *  O botão final "VER LIVRO + APLICATIVO" abre esta URL NA MESMA ABA,
+     7→ *  preservando automaticamente os parâmetros utm_* recebidos na URL
+     8→ *  do quiz (ex.: ?utm_source=facebook&utm_campaign=sonhou).
+     9→ *
+    10→ *  Para trocar o destino, basta substituir o valor abaixo.
+    11→ * ==================================================================== */
+    12→const CHECKOUT_URL = "https://pay.cakto.com.br/3ahathx_1209170";
+    13→
+    14→/* ======================================================================
+    15→ *  📱 TELA DO APLICATIVO
+    16→ * ======================================================================
+    17→ *  A imagem real da busca no aplicativo não foi enviada junto com a capa
+    18→ *  e o ebook. O componente <AppScreenVisual/> tenta carregar, nesta ordem:
+    19→ *    1) public/assets/app-busca.png
+    20→ *    2) public/assets/app-busca.jpg
+    21→ *  Se nenhum dos arquivos existir, exibe um ESPAÇO RESERVADO claramente
+    22→ *  identificado. Para ativar a imagem real basta salvar o print da busca
+    23→ *  do aplicativo em public/assets/app-busca.png (ou .jpg) — a página
+    24→ *  passa a exibi-la automaticamente, sem mexer no código.
+    25→ * ==================================================================== */
+    26→const APP_SCREEN_SOURCES = ["/assets/app-busca.png", "/assets/app-busca.jpg"];
+    27→
+    28→/* ======================================================================
+    29→ *  📊 EVENTOS DE PIXEL (opcional)
+    30→ * ======================================================================
+    31→ *  O projeto não possui pixel configurado no momento, então as chamadas
+    32→ *  abaixo não fazem nada. Se um pixel (Meta/GTM/GA) for adicionado ao
+    33→ *  <head> depois, os eventos passam a ser registrados automaticamente,
+    34→ *  sem duplicatas (cada evento dispara uma única vez por carregamento):
+    35→ *    - quiz_start      -> clique em "COMEÇAR"
+    36→ *    - quiz_complete   -> conclusão da 6ª resposta
+    37→ *    - checkout_click  -> clique no botão final
+    38→ *  Nenhum evento de compra é registrado aqui (o checkout cuida disso).
+    39→ * ==================================================================== */
+    40→type PixelWindow = Window & {
+    41→  fbq?: (...args: unknown[]) => void;
+    42→  gtag?: (...args: unknown[]) => void;
+    43→  dataLayer?: unknown[];
+    44→};
+    45→
+    46→const firedEvents = new Set<string>();
+    47→
+    48→function trackEvent(name: string, params?: Record<string, unknown>) {
+    49→  if (typeof window === "undefined" || firedEvents.has(name)) return;
+    50→  firedEvents.add(name);
+    51→  try {
+    52→    const w = window as PixelWindow;
+    53→    if (typeof w.fbq === "function") w.fbq("trackCustom", name, params);
+    54→    if (typeof w.gtag === "function") w.gtag("event", name, params);
+    55→    if (Array.isArray(w.dataLayer)) w.dataLayer.push({ event: name, ...params });
+    56→  } catch {
+    57→    /* pixel ausente ou bloqueado: ignora silenciosamente */
+    58→  }
+    59→}
+    60→
+    61→/* ------------------------------------------------------------------ */
+    62→/*  Dados do quiz                                                      */
+    63→/* ------------------------------------------------------------------ */
+    64→
+    65→type Option = { id: string; label: string };
+    66→type Question = { prompt: string; helper?: string; options: Option[] };
+    67→
+    68→const QUESTIONS: Question[] = [
+    69→  {
+    70→    prompt: "Quando acorda, você costuma lembrar do sonho?",
+    71→    options: [
+    72→      { id: "detalhes", label: "Sim, lembro de vários detalhes" },
+    73→      { id: "parte", label: "Lembro só de uma parte" },
+    74→      { id: "imagem", label: "Às vezes fica só uma imagem ou sensação" },
+    75→      { id: "nenhum", label: "Não lembro de nenhum agora" },
+    76→    ],
+    77→  },
+    78→  {
+    79→    prompt: "No sonho que você lembra, o que mais chamou sua atenção?",
+    80→    options: [
+    81→      { id: "animal", label: "Um animal" },
+    82→      { id: "pessoa", label: "Uma pessoa" },
+    83→      { id: "lugar", label: "Um lugar ou objeto" },
+    84→      { id: "situacao", label: "Uma situação que aconteceu" },
+    85→      { id: "nao-lembro", label: "Não lembro agora" },
+    86→    ],
+    87→  },
+    88→  {
+    89→    prompt: "O que você gostaria de consultar primeiro?",
+    90→    helper:
+    91→      "O livro reúne verbetes para consulta, inclusive as associações usadas no contexto do jogo do bicho.",
+    92→    options: [
+    93→      { id: "significado", label: "O significado do sonho" },
+    94→      { id: "bicho", label: "O bicho e os números associados" },
+    95→      { id: "ambos", label: "Quero ver as duas coisas" },
+    96→    ],
+    97→  },
+    98→  {
+    99→    prompt: "Como você procura isso hoje?",
+   100→    options: [
+   101→      { id: "sites", label: "Pesquiso em vários sites" },
+   102→      { id: "alguem", label: "Pergunto para alguém" },
+   103→      { id: "palpite", label: "Vou pelo que lembro ou pelo palpite" },
+   104→      { id: "nao-tenho", label: "Ainda não tenho um jeito de consultar" },
+   105→    ],
+   106→  },
+   107→  {
+   108→    prompt: "O que mais dificulta a consulta?",
+   109→    options: [
+   110→      { id: "palavra", label: "Encontrar a palavra ou o verbete certo" },
+   111→      { id: "junto", label: "Ter significado, bicho e números no mesmo lugar" },
+   112→      { id: "celular", label: "Conseguir consultar pelo celular" },
+   113→      { id: "comecar", label: "Entender por onde começar" },
+   114→    ],
+   115→  },
+   116→  {
+   117→    prompt: "Como você prefere fazer a consulta?",
+   118→    options: [
+   119→      { id: "aplicativo", label: "Digitar uma palavra no aplicativo" },
+   120→      { id: "pdf", label: "Abrir o índice e folhear o PDF" },
+   121→      { id: "ambos", label: "Usar os dois jeitos" },
+   122→    ],
+   123→  },
+   124→];
+   125→
+   126→const STEPS = [
+   127→  "Lembre de um detalhe do sonho",
+   128→  "Busque a palavra no aplicativo ou no índice do PDF",
+   129→  "Consulte o verbete, o bicho e os números associados",
+   130→];
+   131→
+   132→/** Monta a mensagem do resultado a partir das respostas (sem pontuação
+   133→ *  nem interpretação inventada — apenas o caminho de consulta). */
+   134→function resultParagraphs(answers: (string | null)[]): string[] {
+   135→  const paragraphs: string[] = [];
+   136→  switch (answers[2]) {
+   137→    case "significado":
+   138→      paragraphs.push(
+   139→        "Comece pelo verbete do que ficou na sua memória e veja o significado apresentado no livro.",
+   140→      );
+   141→      break;
+   142→    case "bicho":
+   143→      paragraphs.push(
+   144→        "Comece pelo verbete do sonho e consulte o bicho e os números associados no material.",
+   145→      );
+   146→      break;
+   147→    default:
+   148→      paragraphs.push(
+   149→        "Do detalhe que você lembra, vá ao verbete para consultar significado, bicho e números no mesmo caminho.",
+   150→      );
+   151→  }
+   152→  if (answers[0] === "nenhum") {
+   153→    paragraphs.push(
+   154→      "Quando lembrar de uma palavra, animal, pessoa ou situação, você já saberá por onde começar.",
+   155→    );
+   156→  }
+   157→  return paragraphs;
+   158→}
+   159→
+   160→/** Preserva os parâmetros utm_* da URL do quiz ao montar o link final. */
+   161→function buildCheckoutUrl(): string {
+   162→  try {
+   163→    const url = new URL(CHECKOUT_URL);
+   164→    const params = new URLSearchParams(window.location.search);
+   165→    params.forEach((value, key) => {
+   166→      if (key.toLowerCase().startsWith("utm_")) url.searchParams.set(key, value);
+   167→    });
+   168→    return url.toString();
+   169→  } catch {
+   170→    return CHECKOUT_URL;
+   171→  }
+   172→}
+   173→
+   174→/* ------------------------------------------------------------------ */
+   175→/*  Estado da sessão (armazenamento externo + useSyncExternalStore)    */
+   176→/* ------------------------------------------------------------------ */
+   177→
+   178→type Stage = "intro" | "quiz" | "result";
+   179→const STORAGE_KEY = "livro-dos-sonhos-quiz-v1";
+   180→
+   181→type QuizState = { stage: Stage; current: number; answers: (string | null)[] };
+   182→
+   183→const defaultState: QuizState = {
+   184→  stage: "intro",
+   185→  current: 0,
+   186→  answers: Array(QUESTIONS.length).fill(null),
+   187→};
+   188→
+   189→function isValidState(data: unknown): data is QuizState {
+   190→  if (typeof data !== "object" || data === null) return false;
+   191→  const d = data as Partial<QuizState>;
+   192→  const validAnswers =
+   193→    Array.isArray(d.answers) &&
+   194→    d.answers.length === QUESTIONS.length &&
+   195→    d.answers.every((a) => a === null || typeof a === "string");
+   196→  if (!validAnswers) return false;
+   197→  if (d.stage === "quiz") {
+   198→    return typeof d.current === "number" && d.current >= 0 && d.current < QUESTIONS.length;
+   199→  }
+   200→  if (d.stage === "result") {
+   201→    return (d.answers as (string | null)[]).every((a) => a !== null);
+   202→  }
+   203→  return false;
+   204→}
+   205→
+   206→/** Lê as respostas salvas na sessão (uma única vez). */
+   207→function readSavedState(): QuizState | null {
+   208→  try {
+   209→    const raw = sessionStorage.getItem(STORAGE_KEY);
+   210→    if (!raw) return null;
+   211→    const data = JSON.parse(raw);
+   212→    return isValidState(data) ? data : null;
+   213→  } catch {
+   214→    return null;
+   215→  }
+   216→}
+   217→
+   218→/* Mini armazenamento externo: fonte única de verdade do progresso.
+   219→   Mantém as respostas salvas localmente durante a sessão (reload não
+   220→   perde o progresso) sem quebrar a hidratação do servidor. */
+   221→let memoryState: QuizState = defaultState;
+   222→let hydratedFromStorage = false;
+   223→const listeners = new Set<() => void>();
+   224→
+   225→function getSnapshot(): QuizState {
+   226→  if (!hydratedFromStorage) {
+   227→    hydratedFromStorage = true;
+   228→    memoryState = readSavedState() ?? memoryState;
+   229→  }
+   230→  return memoryState;
+   231→}
+   232→
+   233→function getServerSnapshot(): QuizState {
+   234→  return defaultState;
+   235→}
+   236→
+   237→function subscribe(listener: () => void): () => void {
+   238→  listeners.add(listener);
+   239→  return () => {
+   240→    listeners.delete(listener);
+   241→  };
+   242→}
+   243→
+   244→function updateQuizState(next: QuizState): void {
+   245→  memoryState = next;
+   246→  try {
+   247→    if (next.stage === "intro") {
+   248→      sessionStorage.removeItem(STORAGE_KEY);
+   249→    } else {
+   250→      /* mantém quiz em andamento E resultado concluído salvos
+   251→         durante a sessão (recarregar não perde o progresso) */
+   252→      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+   253→    }
+   254→  } catch {
+   255→    /* armazenamento indisponível: mantém apenas em memória */
+   256→  }
+   257→  listeners.forEach((listener) => listener());
+   258→}
+   259→
+   260→/* ------------------------------------------------------------------ */
+   261→/*  Componentes visuais                                                */
+   262→/* ------------------------------------------------------------------ */
+   263→
+   264→import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+   265→import Image from "next/image";
+   266→import { AnimatePresence, MotionConfig, motion } from "framer-motion";
+   267→import { ArrowRight, Check, ChevronLeft, Search } from "lucide-react";
+   268→import { cn } from "@/lib/utils";
+   269→
+   270→const goldCtaClass =
+   271→  "inline-flex min-h-[62px] w-full cursor-pointer items-center justify-center gap-2.5 rounded-2xl bg-gold px-6 " +
+   272→  "text-[17px] font-extrabold uppercase tracking-[0.04em] text-[#241b07] " +
+   273→  "shadow-[0_16px_38px_-14px_rgba(233,181,60,0.6)] transition duration-150 " +
+   274→  "hover:bg-gold-strong hover:brightness-[1.04] active:scale-[0.985] " +
+   275→  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-soft focus-visible:ring-offset-2 focus-visible:ring-offset-ink";
+   276→
+   277→/** Etiqueta pequena em dourado com filete. */
+   278→function Eyebrow({ children, className }: { children: React.ReactNode; className?: string }) {
+   279→  return (
+   280→    <p
+   281→      className={cn(
+   282→        "flex items-center gap-2.5 text-[12px] font-extrabold uppercase tracking-[0.18em] text-gold",
+   283→        className,
+   284→      )}
+   285→    >
+   286→      <span aria-hidden className="h-px w-6 bg-gold/60" />
+   287→      {children}
+   288→    </p>
+   289→  );
+   290→}
+   291→
+   292→/** Tela do aplicativo: usa a imagem real se existir; senão, espaço
+   293→ *  reservado claramente identificado (ver comentário no topo do arquivo). */
+   294→function AppScreenVisual() {
+   295→  const [sourceIndex, setSourceIndex] = useState(0);
+   296→  const failed = sourceIndex >= APP_SCREEN_SOURCES.length;
+   297→
+   298→  if (failed) {
+   299→    return (
+   300→      <div
+   301→        role="img"
+   302→        aria-label="Espaço reservado para a imagem real da busca no aplicativo"
+   303→        className="flex h-full w-full flex-col items-center justify-center gap-1.5 rounded-[12px] border-2 border-dashed border-gold/50 bg-coal px-2 text-center"
+   304→      >
+   305→        <Search aria-hidden className="h-5 w-5 text-gold/70" />
+   306→        <span className="text-[10px] font-bold uppercase leading-tight tracking-[0.1em] text-gold/85">
+   307→          Tela do aplicativo
+   308→        </span>
+   309→        <span className="text-[8.5px] leading-tight text-cream/45">
+   310→          espaço reservado — substitua por
+   311→          <br />
+   312→          public/assets/app-busca.png
+   313→        </span>
+   314→      </div>
+   315→    );
+   316→  }
+   317→
+   318→  return (
+   319→    <Image
+   320→      src={APP_SCREEN_SOURCES[sourceIndex]}
+   321→      alt="Busca por palavra no aplicativo do Livro dos Sonhos"
+   322→      fill
+   323→      sizes="150px"
+   324→      className="object-cover object-top"
+   325→      onError={() => setSourceIndex((i) => i + 1)}
+   326→    />
+   327→  );
+   328→}
+   329→
+   330→/** Moldura de celular usada na abertura e no resultado. */
+   331→function PhoneFrame({ className }: { className?: string }) {
+   332→  return (
+   333→    <div
+   334→      className={cn(
+   335→        "relative aspect-[9/17] overflow-hidden rounded-[18px] border border-gold/40 bg-coal shadow-[0_18px_40px_-16px_rgba(0,0,0,0.8)]",
+   336→        className,
+   337→      )}
+   338→    >
+   339→      <AppScreenVisual />
+   340→      <span
+   341→        aria-hidden
+   342→        className="absolute left-1/2 top-1.5 h-1 w-10 -translate-x-1/2 rounded-full bg-cream/15"
+   343→      />
+   344→    </div>
+   345→  );
+   346→}
+   347→
+   348→/* ------------------------------------------------------------------ */
+   349→/*  Página                                                             */
+   350→/* ------------------------------------------------------------------ */
+   351→
+   352→export default function DreamBookQuiz() {
+   353→  const { stage, current, answers } = useSyncExternalStore(
+   354→    subscribe,
+   355→    getSnapshot,
+   356→    getServerSnapshot,
+   357→  );
+   358→
+   359→  const [selected, setSelected] = useState<string | null>(null);
+   360→  const [locked, setLocked] = useState(false);
+   361→  const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
+   362→
+   363→  /* O botão final abre o CHECKOUT_URL na mesma aba. Assim que o link
+   364→     entra no DOM, o href é atualizado para incluir os parâmetros utm_*
+   365→     recebidos na URL do quiz (o HTML renderizado no servidor já contém
+   366→     o CHECKOUT_URL puro, garantindo link funcional sem JavaScript). */
+   367→  const checkoutLinkRef = useCallback((el: HTMLAnchorElement | null) => {
+   368→    if (el) el.setAttribute("href", buildCheckoutUrl());
+   369→  }, []);
+   370→
+   371→  /* Mantém o topo visível a cada troca de tela. */
+   372→  useEffect(() => {
+   373→    window.scrollTo(0, 0);
+   374→  }, [stage, current]);
+   375→  const activeAnswer = selected ?? answers[current];
+   376→  const question = QUESTIONS[current];
+   377→
+   378→  function startQuiz() {
+   379→    trackEvent("quiz_start");
+   380→    updateQuizState({ stage: "quiz", current: 0, answers });
+   381→  }
+   382→
+   383→  function goBack() {
+   384→    if (current === 0) {
+   385→      updateQuizState({ stage: "intro", current: 0, answers });
+   386→    } else {
+   387→      setSelected(null);
+   388→      setLocked(false);
+   389→      updateQuizState({ stage: "quiz", current: current - 1, answers });
+   390→    }
+   391→  }
+   392→
+   393→  function choose(optionId: string) {
+   394→    if (locked) return;
+   395→    setSelected(optionId);
+   396→    setLocked(true);
+   397→
+   398→    window.setTimeout(() => {
+   399→      const nextAnswers = [...answers];
+   400→      nextAnswers[current] = optionId;
+   401→
+   402→      if (current === QUESTIONS.length - 1) {
+   403→        trackEvent("quiz_complete");
+   404→        updateQuizState({ stage: "result", current, answers: nextAnswers });
+   405→      } else {
+   406→        updateQuizState({ stage: "quiz", current: current + 1, answers: nextAnswers });
+   407→      }
+   408→      setSelected(null);
+   409→      setLocked(false);
+   410→    }, 400);
+   411→  }
+   412→
+   413→  function restartQuiz() {
+   414→    setSelected(null);
+   415→    setLocked(false);
+   416→    updateQuizState(defaultState);
+   417→  }
+   418→
+   419→  /* Navegação por setas entre as alternativas (teclado). */
+   420→  function handleListKeyDown(event: React.KeyboardEvent<HTMLDivElement>) {
+   421→    const deltas: Record<string, number> = {
+   422→      ArrowDown: 1,
+   423→      ArrowUp: -1,
+   424→      ArrowRight: 1,
+   425→      ArrowLeft: -1,
+   426→    };
+   427→    const delta = deltas[event.key];
+   428→    if (!delta) return;
+   429→    event.preventDefault();
+   430→    const refs = optionRefs.current.filter(Boolean) as HTMLButtonElement[];
+   431→    const focusedIndex = refs.findIndex((r) => r === document.activeElement);
+   432→    const nextIndex = (focusedIndex + delta + refs.length) % refs.length;
+   433→    refs[nextIndex]?.focus();
+   434→  }
+   435→
+   436→  const paragraphs = resultParagraphs(answers);
+   437→  const screenKey = stage === "quiz" ? `q-${current}` : stage;
+   438→
+   439→  return (
+   440→    <MotionConfig reducedMotion="user">
+   441→      <div className="relative flex min-h-dvh flex-col bg-ink font-sans">
+   442→        {/* brilho dourado decorativo */}
+   443→        <div
+   444→          aria-hidden
+   445→          className="pointer-events-none absolute inset-x-0 top-0 h-[460px] bg-[radial-gradient(62%_52%_at_50%_0%,rgba(233,181,60,0.10),transparent_72%)]"
+   446→        />
+   447→
+   448→        <main className="relative z-10 mx-auto flex w-full max-w-[520px] flex-1 flex-col px-5">
+   449→          <AnimatePresence mode="wait" initial={false}>
+   450→            {/* ============ TELA DE ABERTURA ============ */}
+   451→            {stage === "intro" && (
+   452→              <motion.section
+   453→                key="intro"
+   454→                aria-label="Abertura do quiz"
+   455→                initial={{ opacity: 0, y: 16 }}
+   456→                animate={{ opacity: 1, y: 0 }}
+   457→                exit={{ opacity: 0, y: -12 }}
+   458→                transition={{ duration: 0.28, ease: "easeOut" }}
+   459→                className="flex flex-1 flex-col justify-center py-8"
+   460→              >
+   461→                <Eyebrow>Quiz rápido • 6 perguntas</Eyebrow>
+   462→
+   463→                <h1 className="mt-4 font-serif text-[40px] font-extrabold leading-[1.05] tracking-tight text-cream">
+   464→                  Sonhou?
+   465→                  <br />
+   466→                  <em className="text-gold">E agora?</em>
+   467→                </h1>
+   468→
+   469→                <p className="mt-4 max-w-[26rem] text-[17px] leading-relaxed text-cream/75">
+   470→                  Veja o caminho mais prático para consultar o significado, o bicho e os números
+   471→                  associados ao que você lembra.
+   472→                </p>
+   473→
+   474→                {/* capa original do livro + tela do aplicativo */}
+   475→                <div
+   476→                  className="mt-8 flex items-end justify-center gap-4 pb-2"
+   477→                  aria-label="Livro e aplicativo"
+   478→                >
+   479→                  <div className="w-[58%] max-w-[212px] -rotate-2">
+   480→                    <Image
+   481→                      src="/assets/capa-livro-dos-sonhos.jpg"
+   482→                      alt="Capa original do Livro dos Sonhos, com tigre na capa"
+   483→                      width={840}
+   484→                      height={1187}
+   485→                      priority
+   486→                      sizes="(max-width: 560px) 56vw, 212px"
+   487→                      className="h-auto w-full rounded-lg border border-gold/25 object-cover shadow-[0_24px_50px_-20px_rgba(0,0,0,0.85)]"
+   488→                    />
+   489→                  </div>
+   490→                  <PhoneFrame className="w-[34%] max-w-[118px] rotate-[4deg]" />
+   491→                </div>
+   492→
+   493→                <button type="button" onClick={startQuiz} className={cn(goldCtaClass, "mt-9")}>
+   494→                  Começar
+   495→                  <ArrowRight aria-hidden className="h-5 w-5" strokeWidth={2.75} />
+   496→                </button>
+   497→
+   498→                <p className="mt-3.5 text-center text-[14px] text-cream/55">
+   499→                  Leva menos de 1 minuto.
+   500→                </p>
+   501→              </motion.section>
+   502→            )}
+   503→
+   504→            {/* ============ PERGUNTAS ============ */}
+   505→            {stage === "quiz" && (
+   506→              <motion.section
+   507→                key={screenKey}
+   508→                aria-label={`Pergunta ${current + 1} de ${QUESTIONS.length}`}
+   509→                initial={{ opacity: 0, y: 16 }}
+   510→                animate={{ opacity: 1, y: 0 }}
+   511→                exit={{ opacity: 0, y: -12 }}
+   512→                transition={{ duration: 0.26, ease: "easeOut" }}
+   513→                className="flex flex-1 flex-col py-6"
+   514→              >
+   515→                <header>
+   516→                  <div className="flex min-h-[44px] items-center justify-between gap-3">
+   517→                    <button
+   518→                      type="button"
+   519→                      onClick={goBack}
+   520→                      className="-ml-2 flex min-h-[44px] cursor-pointer items-center gap-1 rounded-lg px-2 text-[14px] font-semibold uppercase tracking-[0.08em] text-cream/60 transition-colors hover:text-cream focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
+   521→                    >
+   522→                      <ChevronLeft aria-hidden className="h-5 w-5" strokeWidth={2.5} />
+   523→                      Voltar
+   524→                    </button>
+   525→                    <span
+   526→                      className="text-[13px] font-bold uppercase tracking-[0.16em] text-gold"
+   527→                      aria-live="polite"
+   528→                    >
+   529→                      {current + 1} de {QUESTIONS.length}
+   530→                    </span>
+   531→                  </div>
+   532→
+   533→                  {/* barra de progresso real */}
+   534→                  <div
+   535→                    role="progressbar"
+   536→                    aria-label="Progresso do quiz"
+   537→                    aria-valuemin={0}
+   538→                    aria-valuemax={QUESTIONS.length}
+   539→                    aria-valuenow={current + 1}
+   540→                    className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-cream/10"
+   541→                  >
+   542→                    <div
+   543→                      className="h-full rounded-full bg-gold transition-all duration-300 ease-out"
+   544→                      style={{ width: `${((current + 1) / QUESTIONS.length) * 100}%` }}
+   545→                    />
+   546→                  </div>
+   547→                </header>
+   548→
+   549→                <div className="flex flex-1 flex-col justify-center py-6">
+   550→                  <h2 className="text-[21px] font-semibold leading-snug text-cream">
+   551→                    {question.prompt}
+   552→                  </h2>
+   553→
+   554→                  {question.helper && (
+   555→                    <p className="mt-2.5 text-[15px] leading-snug text-cream/55">{question.helper}</p>
+   556→                  )}
+   557→
+   558→                  <div
+   559→                    role="radiogroup"
+   560→                    aria-label={question.prompt}
+   561→                    onKeyDown={handleListKeyDown}
+   562→                    className="mt-6 flex flex-col gap-3"
+   563→                  >
+   564→                    {question.options.map((option, index) => {
+   565→                      const isActive = option.id === activeAnswer;
+   566→                      const rovingTabIndex = isActive || (!activeAnswer && index === 0) ? 0 : -1;
+   567→                      return (
+   568→                        <button
+   569→                          key={option.id}
+   570→                          ref={(el) => {
+   571→                            optionRefs.current[index] = el;
+   572→                          }}
+   573→                          type="button"
+   574→                          role="radio"
+   575→                          aria-checked={isActive}
+   576→                          tabIndex={rovingTabIndex}
+   577→                          onClick={() => choose(option.id)}
+   578→                          className={cn(
+   579→                            "group flex min-h-[62px] w-full cursor-pointer items-center gap-3.5 rounded-2xl border px-5 py-4 text-left transition-all duration-150",
+   580→                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ink",
+   581→                            isActive
+   582→                              ? "border-gold bg-gold/[0.14] text-cream shadow-[inset_0_0_0_1px_rgba(233,181,60,0.4)]"
+   583→                              : "border-cream/15 bg-coal/70 text-cream/90 hover:border-cream/40 hover:bg-coal active:scale-[0.99]",
+   584→                          )}
+   585→                        >
+   586→                          <span
+   587→                            aria-hidden
+   588→                            className={cn(
+   589→                              "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors duration-150",
+   590→                              isActive ? "border-gold bg-gold" : "border-cream/30 group-hover:border-cream/60",
+   591→                            )}
+   592→                          >
+   593→                            {isActive && (
+   594→                              <Check className="h-4 w-4 text-[#241b07]" strokeWidth={3.25} />
+   595→                            )}
+   596→                          </span>
+   597→                          <span className="text-[17px] font-medium leading-snug">{option.label}</span>
+   598→                        </button>
+   599→                      );
+   600→                    })}
+   601→                  </div>
+   602→                </div>
+   603→              </motion.section>
+   604→            )}
+   605→
+   606→            {/* ============ RESULTADO ============ */}
+   607→            {stage === "result" && (
+   608→              <motion.section
+   609→                key="result"
+   610→                aria-label="Resultado e oferta"
+   611→                initial={{ opacity: 0, y: 16 }}
+   612→                animate={{ opacity: 1, y: 0 }}
+   613→                exit={{ opacity: 0, y: -12 }}
+   614→                transition={{ duration: 0.3, ease: "easeOut" }}
+   615→                className="py-8"
+   616→              >
+   617→                <Eyebrow>Resultado</Eyebrow>
+   618→
+   619→                <h2 className="mt-4 font-serif text-[34px] font-extrabold leading-[1.08] tracking-tight text-cream">
+   620→                  Seu caminho de consulta <em className="text-gold">está pronto.</em>
+   621→                </h2>
+   622→
+   623→                <div className="mt-4 space-y-3">
+   624→                  {paragraphs.map((paragraph) => (
+   625→                    <p key={paragraph} className="text-[17.5px] leading-relaxed text-cream/80">
+   626→                      {paragraph}
+   627→                    </p>
+   628→                  ))}
+   629→                </div>
+   630→
+   631→                {/* três passos + imagens reais do material */}
+   632→                <div className="mt-9">
+   633→                  <Eyebrow className="text-gold/85">Como consultar na prática</Eyebrow>
+   634→
+   635→                  <ol className="mt-4 flex flex-col gap-3">
+   636→                    {STEPS.map((step, index) => (
+   637→                      <li
+   638→                        key={step}
+   639→                        className="flex items-center gap-3.5 rounded-2xl border border-cream/12 bg-coal/70 p-4"
+   640→                      >
+   641→                        <span
+   642→                          aria-hidden
+   643→                          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-terra/45 bg-terra/15 font-serif text-[17px] font-bold text-[#e2916f]"
+   644→                        >
+   645→                          {index + 1}
+   646→                        </span>
+   647→                        <span className="text-[16.5px] font-medium leading-snug text-cream/90">
+   648→                          {step}
+   649→                        </span>
+   650→                      </li>
+   651→                    ))}
+   652→                  </ol>
+   653→
+   654→                  {/* páginas reais do livro (índice, tabela e verbetes)
+   655→                      + tela real do aplicativo sobreposta */}
+   656→                  <div className="relative mt-7 mb-9">
+   657→                    <div className="overflow-hidden rounded-2xl border border-gold/25 bg-cream-deep">
+   658→                      <Image
+   659→                        src="/assets/paginas-livro.jpg"
+   660→                        alt="Páginas reais do Livro dos Sonhos: índice, tabela de bichos e números e verbetes de sonhos"
+   661→                        width={1240}
+   662→                        height={780}
+   663→                        loading="eager"
+   664→                        sizes="(max-width: 560px) 90vw, 480px"
+   665→                        className="h-auto w-full"
+   666→                      />
+   667→                    </div>
+   668→                    <div className="absolute -bottom-5 right-2 w-[30%] min-w-[92px] max-w-[128px]">
+   669→                      <div className="relative">
+   670→                        <span className="absolute -top-3 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-gold px-2.5 py-[3px] text-[10px] font-extrabold uppercase tracking-[0.08em] text-[#241b07] shadow-md">
+   671→                          Aplicativo
+   672→                        </span>
+   673→                        <PhoneFrame />
+   674→                      </div>
+   675→                    </div>
+   676→                  </div>
+   677→                  <p className="text-center text-[13px] leading-snug text-cream/50">
+   678→                    Páginas reais do livro: índice, tabela e verbetes.
+   679→                  </p>
+   680→                </div>
+   681→
+   682→                {/* oferta */}
+   683→                <section
+   684→                  aria-label="Oferta do Livro dos Sonhos com aplicativo"
+   685→                  className="mt-10 rounded-3xl border border-[#d8c69f] bg-cream p-6 text-[#221b10] shadow-[0_30px_70px_-28px_rgba(0,0,0,0.85)]"
+   686→                >
+   687→                  <div className="flex items-center gap-4">
+   688→                    <Image
+   689→                      src="/assets/capa-livro-dos-sonhos.jpg"
+   690→                      alt="Capa do Livro dos Sonhos"
+   691→                      width={840}
+   692→                      height={1187}
+   693→                      sizes="72px"
+   694→                      className="h-auto w-[72px] shrink-0 rounded-md border border-[#d8c69f] object-cover shadow-sm"
+   695→                    />
+   696→                    <div>
+   697→                      <p className="text-[11px] font-extrabold uppercase tracking-[0.16em] text-[#a4441f]">
+   698→                        Oferta
+   699→                      </p>
+   700→                      <h3 className="mt-1 font-serif text-[23px] font-extrabold leading-[1.12]">
+   701→                        Livro dos Sonhos + Aplicativo
+   702→                      </h3>
+   703→                    </div>
+   704→                  </div>
+   705→
+   706→                  <p className="mt-3.5 text-[15.5px] leading-relaxed text-[#4a3f2b]">
+   707→                    PDF para folhear. Aplicativo para buscar pelo celular.
+   708→                  </p>
+   709→
+   710→                  <div className="mt-4 flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+   711→                    <span className="font-serif text-[44px] font-black leading-none tracking-tight text-[#1c1710]">
+   712→                      R$ 19,90
+   713→                    </span>
+   714→                    <span className="text-[13.5px] font-semibold text-[#6b5c3e]">pagamento único</span>
+   715→                  </div>
+   716→
+   717→                  <a
+   718→                    ref={checkoutLinkRef}
+   719→                    href={CHECKOUT_URL}
+   720→                    onClick={() => trackEvent("checkout_click")}
+   721→                    className={cn(
+   722→                      goldCtaClass,
+   723→                      "mt-5 focus-visible:ring-[#241b07]/60 focus-visible:ring-offset-[#f6f0e4]",
+   724→                    )}
+   725→                  >
+   726→                    Ver livro + aplicativo
+   727→                    <ArrowRight aria-hidden className="h-5 w-5" strokeWidth={2.75} />
+   728→                  </a>
+   729→
+   730→                  <p className="mt-3.5 text-center text-[13px] leading-snug text-[#6b5c3e]">
+   731→                    Você verá os detalhes da oferta antes de finalizar a compra.
+   732→                  </p>
+   733→                </section>
+   734→
+   735→                <button
+   736→                  type="button"
+   737→                  onClick={restartQuiz}
+   738→                  className="mx-auto mt-7 block min-h-[44px] cursor-pointer rounded-lg px-4 text-[14px] font-semibold text-cream/45 underline-offset-4 transition-colors hover:text-cream/80 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
+   739→                >
+   740→                  Refazer o quiz
+   741→                </button>
+   742→              </motion.section>
+   743→            )}
+   744→          </AnimatePresence>
+   745→        </main>
+   746→
+   747→        <footer className="relative z-10 mt-auto border-t border-cream/10 px-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] pt-4">
+   748→          <p className="mx-auto max-w-[520px] text-center text-[12px] leading-relaxed text-cream/40">
+   749→            Livro dos Sonhos — livro digital em PDF e aplicativo de consulta. Material de consulta:
+   750→            não promete acertos, prêmios nem resultados financeiros. Proibido para menores de 18
+   751→            anos.
+   752→          </p>
+   753→        </footer>
+   754→      </div>
+   755→    </MotionConfig>
+   756→  );
+   757→}
+   758→

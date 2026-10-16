@@ -3,8 +3,8 @@ import "./globals.css";
 
 /**
  * Tipografia do quiz "Livro dos Sonhos" (auto-hospedada em /public/fonts):
- * - Playfair Display: serifada elegante e forte -> títulos
- * - Archivo: sans-serif muito legível -> perguntas, alternativas e botões
+ * Plus Jakarta Sans variável (200–800) — elegante e de leitura fácil
+ * para público adulto no celular (títulos, perguntas, alternativas e botões).
  */
 export const metadata: Metadata = {
   title: "Sonhou? E agora? — Quiz Livro dos Sonhos",
@@ -23,7 +23,7 @@ export const metadata: Metadata = {
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
-  themeColor: "#0b0a08",
+  themeColor: "#f6f0e4",
 };
 
 export default function RootLayout({
@@ -34,30 +34,16 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" suppressHydrationWarning>
       <head>
-        {/* fontes críticas para a primeira dobra */}
+        {/* fonte crítica para a primeira dobra */}
         <link
           rel="preload"
-          href="/fonts/playfairdisplay-normal-800.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="preload"
-          href="/fonts/archivo-normal-400.woff2"
-          as="font"
-          type="font/woff2"
-          crossOrigin="anonymous"
-        />
-        <link
-          rel="preload"
-          href="/fonts/archivo-normal-800.woff2"
+          href="/fonts/plusjakartasans-variable-latin.woff2"
           as="font"
           type="font/woff2"
           crossOrigin="anonymous"
         />
       </head>
-      <body className="antialiased bg-[#0b0a08] text-[#f6f0e4]">{children}</body>
+      <body className="antialiased bg-[#f6f0e4] text-[#241d12]">{children}</body>
     </html>
   );
 }

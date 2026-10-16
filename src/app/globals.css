@@ -4,70 +4,15 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ------------------------------------------------------------------ */
-/*  Fontes auto-hospedadas (subconjunto latin, Google Fonts)           */
-/*  Serifada elegante -> títulos | Sans legível -> perguntas/botões    */
+/*  Fonte auto-hospedada (subconjunto latin, Google Fonts)             */
+/*  Plus Jakarta Sans variável (200–800): elegante e muito legível     */
+/*  para perguntas, alternativas e botões no celular                   */
 /* ------------------------------------------------------------------ */
 
 @font-face {
-  font-family: "Playfair Display";
-  src: url("/fonts/playfairdisplay-normal-700.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Playfair Display";
-  src: url("/fonts/playfairdisplay-normal-800.woff2") format("woff2");
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Playfair Display";
-  src: url("/fonts/playfairdisplay-normal-900.woff2") format("woff2");
-  font-weight: 900;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Playfair Display";
-  src: url("/fonts/playfairdisplay-italic-800.woff2") format("woff2");
-  font-weight: 800;
-  font-style: italic;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Archivo";
-  src: url("/fonts/archivo-normal-400.woff2") format("woff2");
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Archivo";
-  src: url("/fonts/archivo-normal-500.woff2") format("woff2");
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Archivo";
-  src: url("/fonts/archivo-normal-600.woff2") format("woff2");
-  font-weight: 600;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Archivo";
-  src: url("/fonts/archivo-normal-700.woff2") format("woff2");
-  font-weight: 700;
-  font-style: normal;
-  font-display: swap;
-}
-@font-face {
-  font-family: "Archivo";
-  src: url("/fonts/archivo-normal-800.woff2") format("woff2");
-  font-weight: 800;
+  font-family: "Plus Jakarta Sans";
+  src: url("/fonts/plusjakartasans-variable-latin.woff2") format("woff2");
+  font-weight: 200 800;
   font-style: normal;
   font-display: swap;
 }
@@ -75,18 +20,23 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-serif: "Playfair Display", Georgia, "Times New Roman", serif;
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-serif: "Plus Jakarta Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: ui-monospace, monospace;
 
-  /* Paleta "Livro dos Sonhos" (identidade do checkout) */
-  --color-ink: #0b0a08; /* fundo carvão profundo */
-  --color-coal: #16130e; /* superfície elevada */
-  --color-cream: #f6f0e4; /* áreas em creme */
+  /* Paleta "Livro dos Sonhos" — identidade do checkout:
+     fundo creme, texto escuro e detalhes dourados */
+  --color-cream: #f6f0e4; /* fundo creme da página */
   --color-cream-deep: #ece3d0; /* creme sombreado */
-  --color-gold: #e9b53c; /* amarelo dourado (destaques/botões) */
+  --color-paper: #fffdf7; /* cartões elevados */
+  --color-ink: #241d12; /* texto principal (marrom-escuro) */
+  --color-ink-soft: #5c503a; /* texto secundário */
+  --color-ink-faint: #6f6248; /* legendas discretas */
+  --color-coal: #16130e; /* aro dos mockups de celular */
+  --color-gold: #e9b53c; /* amarelo dourado (botões/destaques) */
   --color-gold-strong: #f2c24e; /* dourado hover */
   --color-gold-soft: #f7d98a; /* dourado claro */
+  --color-gold-deep: #7a5b10; /* dourado escuro p/ texto e anéis sobre creme */
   --color-terra: #c05b3f; /* terracota (pequenos acentos) */
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -190,6 +140,18 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+/* Roleta da condição: giro rápido com desaceleração natural.
+   Respeita a preferência de movimento reduzido do dispositivo. */
+.wheel-rotor {
+  transition: transform 1.7s cubic-bezier(0.12, 0.82, 0.18, 1);
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wheel-rotor {
+    transition: none;
+  }
 }
 
 @layer base {
