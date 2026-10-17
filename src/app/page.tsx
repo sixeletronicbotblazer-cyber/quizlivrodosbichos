@@ -3,9 +3,15 @@
 /* ======================================================================
  *  🔗 LINK DO CHECKOUT — COLE AQUI A URL DE PAGAMENTO
  * ======================================================================
- *  Os botões finais ("VER MINHA CONDIÇÃO" e "Continuar para a página")
- *  abrem esta URL NA MESMA ABA, preservando automaticamente os parâmetros
- *  utm_* recebidos na URL do quiz (ex.: ?utm_source=facebook&utm_campaign=sonhou).
+ *  Todas as saídas do resultado (botão "VER MINHA CONDIÇÃO", pular a
+ *  roleta e qualquer redirecionamento automático) usam a MESMA função
+ *  de navegação (goToCheckout) e abrem esta URL NA MESMA ABA.
+ *
+ *  O link preserva automaticamente os parâmetros de campanha recebidos
+ *  na entrada do quiz: utm_source, utm_medium, utm_campaign,
+ *  utm_content, utm_term, src e fbclid (quando presentes). Parâmetros
+ *  que já existirem nesta URL não são apagados; respostas do quiz
+ *  nunca são enviadas pela URL.
  *
  *  Para trocar o destino, basta substituir o valor abaixo.
  * ==================================================================== */
@@ -70,37 +76,88 @@ function ofertaInfo(nowMs: number): OfertaInfo {
 }
 
 /* ======================================================================
- *  📊 EVENTOS DE PIXEL (opcional)
+ *  📊 META PIXEL — EVENTOS DO QUIZ (Pixel 900080772936894)
  * ======================================================================
- *  O projeto não possui pixel configurado no momento, então as chamadas
- *  abaixo não fazem nada. Se um pixel (Meta/GTM/GA) for adicionado ao
- *  <head> depois, os eventos passam a ser registrados automaticamente,
- *  sem duplicatas (cada evento dispara uma única vez por carregamento):
- *    - quiz_start       -> clique em "COMEÇAR"
- *    - quiz_complete    -> conclusão da 6ª resposta
- *    - condition_reveal -> clique em "REVELAR MINHA CONDIÇÃO"
- *    - checkout_click   -> clique num link de avanço para o checkout
- *  Nenhum evento de compra é registrado aqui (o checkout cuida disso).
+ *  O código base do Pixel fica instalado UMA única vez em
+ *  src/app/layout.tsx e dispara PageView sozinho no carregamento da
+ *  página (entrada do quiz). Os eventos personalizados são disparados
+ *  aqui, sempre no máximo UMA vez por sessão do navegador:
+ *
+ *    - QuizStarted   → toque em "COMEÇAR" (a 1ª pergunta aparece em
+ *                      seguida); recarregar a página não dispara de novo;
+ *    - QuizCompleted → conclusão REAL da 6ª resposta (chegada ao
+ *                      resultado). Independe de girar a roleta ou clicar
+ *                      no botão final; voltar, rever respostas, refazer o
+ *                      quiz, recarregar ou toque duplo não disparam o
+ *                      evento uma segunda vez na mesma sessão.
+ *
+ *  O quiz NÃO dispara Lead, Purchase nem InitiateCheckout — o checkout
+ *  (Cakto) é o responsável pelos eventos da venda.
  * ==================================================================== */
-type PixelWindow = Window & {
-  fbq?: (...args: unknown[]) => void;
-  gtag?: (...args: unknown[]) => void;
-  dataLayer?: unknown[];
-};
+type PixelWindow = Window & { fbq?: (...args: unknown[]) => void };
 
-const firedEvents = new Set<string>();
+/** Chave de sessão usada para o dedup dos eventos acima. */
+const PIXEL_EVENT_PREFIX = "livro-dos-sonhos-evt:";
 
-function trackEvent(name: string, params?: Record<string, unknown>) {
-  if (typeof window === "undefined" || firedEvents.has(name)) return;
-  firedEvents.add(name);
+/** Parâmetros de campanha preservados no link do checkout (além de
+ *  qualquer parâmetro utm_*, preservado como grupo). */
+const CAMPAIGN_PARAMS_EXTRAS = ["src", "fbclid"];
+
+/** Margem máxima (ms) de espera antes de trocar de página quando um
+ *  evento foi disparado há poucos instantes — dá tempo ao envio sem
+ *  criar uma espera perceptível. A navegação acontece mesmo assim se
+ *  o Pixel estiver bloqueado. */
+const PIXEL_FLUSH_MS = 300;
+
+/** Momento (ms) do último evento disparado. */
+let lastPixelEventAt = 0;
+
+/** Dispara um evento personalizado no Pixel no máximo UMA vez por
+ *  sessão. Se o Pixel estiver bloqueado ou indisponível, o evento
+ *  simplesmente não sai — o fluxo do quiz nunca depende dele. */
+function trackCustomOncePerSession(name: "QuizStarted" | "QuizCompleted"): void {
+  if (typeof window === "undefined") return;
+  const key = `${PIXEL_EVENT_PREFIX}${name}`;
+  try {
+    if (sessionStorage.getItem(key)) return; // já disparado nesta sessão
+    sessionStorage.setItem(key, "1");
+  } catch {
+    /* armazenamento indisponível: dispara mesmo assim (best effort) */
+  }
+  lastPixelEventAt = Date.now();
   try {
     const w = window as PixelWindow;
-    if (typeof w.fbq === "function") w.fbq("trackCustom", name, params);
-    if (typeof w.gtag === "function") w.gtag("event", name, params);
-    if (Array.isArray(w.dataLayer)) w.dataLayer.push({ event: name, ...params });
+    if (typeof w.fbq === "function") w.fbq("trackCustom", name);
   } catch {
-    /* pixel ausente ou bloqueado: ignora silenciosamente */
+    /* Pixel bloqueado: ignora silenciosamente */
   }
+}
+
+/** ÚNICA função de navegação para o checkout — usada por TODOS os
+ *  caminhos de saída do resultado (botão "VER MINHA CONDIÇÃO", pular a
+ *  roleta e qualquer redirecionamento automático, se houver). Abre o
+ *  link NA MESMA ABA, preserva os parâmetros de campanha recebidos na
+ *  entrada e segue funcionando mesmo com o Pixel bloqueado. */
+function goToCheckout(): void {
+  const url = buildCheckoutUrl();
+  const restam = PIXEL_FLUSH_MS - (Date.now() - lastPixelEventAt);
+  if (restam > 0) {
+    /* evento recente: margem mínima para o envio antes de sair */
+    window.setTimeout(() => window.location.assign(url), restam);
+  } else {
+    window.location.assign(url);
+  }
+}
+
+/** Ativação (clique/Enter) de um link de checkout: roteia para a MESMA
+ *  função de navegação. Modificadores (Ctrl/Cmd/Shift/Alt — abrir em
+ *  nova aba/janela) seguem o href normalmente, que já contém os
+ *  parâmetros de campanha. */
+function handleCheckoutLinkClick(event: React.MouseEvent<HTMLAnchorElement>): void {
+  if (event.defaultPrevented || event.button !== 0) return;
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  goToCheckout();
 }
 
 /* ------------------------------------------------------------------ */
@@ -177,13 +234,19 @@ function resultMainText(answers: (string | null)[]): string {
   return "Agora você pode consultar o que ficou do seu sonho, encontrar o verbete e conferir o bicho e os números relacionados.";
 }
 
-/** Preserva os parâmetros utm_* da URL do quiz ao montar o link final. */
+/** Monta o link final do checkout preservando os parâmetros de campanha
+ *  recebidos na entrada do quiz (utm_*, src e fbclid, quando presentes).
+ *  Parâmetros que já existirem no CHECKOUT_URL são mantidos (nunca
+ *  apagados) e as respostas do quiz nunca são enviadas pela URL. */
 function buildCheckoutUrl(): string {
   try {
     const url = new URL(CHECKOUT_URL);
     const params = new URLSearchParams(window.location.search);
     params.forEach((value, key) => {
-      if (key.toLowerCase().startsWith("utm_")) url.searchParams.set(key, value);
+      const k = key.toLowerCase();
+      const isCampaign = k.startsWith("utm_") || CAMPAIGN_PARAMS_EXTRAS.includes(k);
+      /* só acrescenta o que ainda não existe no link do checkout */
+      if (isCampaign && !url.searchParams.has(key)) url.searchParams.set(key, value);
     });
     return url.toString();
   } catch {
@@ -723,7 +786,6 @@ function ConditionWheel({
 
   function revealCondition() {
     if (phase !== "idle") return; // ignora toques repetidos
-    trackEvent("condition_reveal");
 
     let prefersReduced = false;
     try {
@@ -814,11 +876,12 @@ function ConditionWheel({
             <Sparkles aria-hidden className="h-5 w-5" strokeWidth={2.5} />
             Revelar minha condição
           </button>
-          {/* opção discreta para pular a animação — nunca é bloqueada */}
+          {/* opção discreta para pular a animação — mesma função de
+              navegação, nunca é bloqueada */}
           <a
             ref={checkoutLinkRef}
             href={CHECKOUT_URL}
-            onClick={() => trackEvent("checkout_click")}
+            onClick={handleCheckoutLinkClick}
             className="mx-auto mt-2 block min-h-[44px] w-fit rounded-lg px-3 text-center text-[13.5px] font-semibold text-ink-faint underline decoration-ink-faint/40 underline-offset-4 transition-colors hover:text-ink hover:decoration-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-gold-deep focus-visible:ring-offset-2 focus-visible:ring-offset-paper"
           >
             Continuar para a página
@@ -840,7 +903,7 @@ function ConditionWheel({
           <a
             ref={checkoutLinkRef}
             href={CHECKOUT_URL}
-            onClick={() => trackEvent("checkout_click")}
+            onClick={handleCheckoutLinkClick}
             className={cn(goldCtaClass, "mt-3 focus-visible:ring-offset-paper")}
           >
             Ver minha condição
@@ -868,10 +931,11 @@ export default function DreamBookQuiz() {
   const optionRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const advanceTimer = useRef<number | null>(null);
 
-  /* Os links de checkout abrem o CHECKOUT_URL na mesma aba. Assim que o
-     link entra no DOM, o href é atualizado para incluir os parâmetros
-     utm_* recebidos na URL do quiz (o HTML renderizado no servidor já
-     contém o CHECKOUT_URL puro, garantindo link funcional sem JS). */
+  /* Os links de checkout usam a MESMA função de navegação (goToCheckout,
+     via handleCheckoutLinkClick). Assim que o link entra no DOM, o href é
+     atualizado para incluir os parâmetros de campanha recebidos na URL do
+     quiz (o HTML renderizado no servidor já contém o CHECKOUT_URL puro,
+     garantindo link funcional sem JS — inclusive Ctrl/Clique em nova aba). */
   const checkoutLinkRef = useCallback((el: HTMLAnchorElement | null) => {
     if (el) el.setAttribute("href", buildCheckoutUrl());
   }, []);
@@ -910,7 +974,9 @@ export default function DreamBookQuiz() {
   }
 
   function startQuiz() {
-    trackEvent("quiz_start");
+    /* 1ª pergunta visualizada a partir do toque em "COMEÇAR" —
+       QuizStarted no máximo uma vez por sessão */
+    trackCustomOncePerSession("QuizStarted");
     updateQuizState({ stage: "quiz", current: 0, answers });
   }
 
@@ -947,7 +1013,10 @@ export default function DreamBookQuiz() {
       const nextAnswers = [...answers];
       nextAnswers[current] = optionId; // resposta salva na hora
       if (current === QUESTIONS.length - 1) {
-        trackEvent("quiz_complete");
+        /* conclusão real das 6 respostas: QuizCompleted uma única vez por
+           sessão — independe da roleta e do botão final (dedup cobre voltar,
+           refazer, recarregar e toque duplo) */
+        trackCustomOncePerSession("QuizCompleted");
         updateQuizState({ stage: "result", current, answers: nextAnswers });
       } else if (current === 1) {
         /* após a pergunta 2: tela educativa curta (não é etapa de vendas) */
